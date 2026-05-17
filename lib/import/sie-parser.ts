@@ -322,7 +322,10 @@ function splitSIELine(line: string): string[] {
       continue
     }
 
-    if (char === ' ' && !inQuotes && braceDepth === 0) {
+    // SIE 4 spec allows either space or tab as field separator (programs like
+    // Bollbok export tab-separated lines). Quoted strings and brace-bounded
+    // dimension lists preserve any interior whitespace via the guards above.
+    if ((char === ' ' || char === '\t') && !inQuotes && braceDepth === 0) {
       if (current) {
         fields.push(current)
         current = ''
@@ -716,6 +719,31 @@ export function parseSIEFile(content: string): ParsedSIEFile {
   for (const accountNumber of referencedAccounts) {
     accounts.push({ number: accountNumber, name: '' })
     addIssue(issues, 'info', 0, `Account ${accountNumber} added from transaction data (not in #KONTO)`)
+  }
+
+  // Silent-failure diagnostic: if the raw input declares #IB / #VER records
+  // but parsing produced none, surface a warning instead of letting the file
+  // look empty. Historically a tab-separator or encoding mismatch could swallow
+  // all balance/voucher records without any visible signal.
+  const rawIBCount = lines.filter((l) => /^\s*#IB\b/.test(l)).length
+  const rawVERCount = lines.filter((l) => /^\s*#VER\b/.test(l)).length
+  if (rawIBCount > 0 && openingBalances.length === 0) {
+    addIssue(
+      issues,
+      'warning',
+      0,
+      `${rawIBCount} #IB-rader hittades men inga ingående saldon kunde tolkas — kontrollera fältavskiljare och teckenkodning`,
+      'IB'
+    )
+  }
+  if (rawVERCount > 0 && vouchers.length === 0) {
+    addIssue(
+      issues,
+      'warning',
+      0,
+      `${rawVERCount} #VER-rader hittades men inga verifikationer kunde tolkas — kontrollera fältavskiljare och teckenkodning`,
+      'VER'
+    )
   }
 
   // Calculate statistics
