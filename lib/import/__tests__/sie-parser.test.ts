@@ -944,12 +944,17 @@ describe('parseSIEFile — tab-separated fields (Bollbok export shape)', () => {
     expect(result.stats.fiscalYearEnd).toBe('2025-12-31')
   })
 
-  it('accepts both unquoted (2025) and quoted (2026) #KTYP values', () => {
+  it('accepts both unquoted (2025) and quoted (2026) #KTYP values and stores them without surrounding quotes', () => {
     const result2025 = parseSIEFile(BOLLBOK_TAB_2025_SHAPE)
     const result2026 = parseSIEFile(BOLLBOK_TAB_2026_SHAPE)
     // Both shapes parse the chart of accounts without complaint
     expect(result2025.accounts.length).toBeGreaterThan(0)
     expect(result2026.accounts.length).toBeGreaterThan(0)
+    // accountType should be the bare letter, never the quoted form
+    const acc2025 = result2025.accounts.find((a) => a.number === '1510')
+    const acc2026 = result2026.accounts.find((a) => a.number === '1510')
+    expect(acc2025?.accountType).toBe('T')
+    expect(acc2026?.accountType).toBe('T')
   })
 
   it('parses tab-separated opening-only file (2026 shape) — IB + UB but no vouchers', () => {
@@ -1018,24 +1023,48 @@ describe('parseSIEFile — silent-failure diagnostic warnings', () => {
     expect(aggregateWarning?.message).toContain('fältavskiljare och teckenkodning')
   })
 
-  it('emits a warning when raw #VER lines exist but none could be parsed', () => {
-    // Place #VER tags without their { } blocks — parsing produces no vouchers.
+  it('emits a warning when raw #VER lines exist but no voucher was committed', () => {
+    // #VER lines parse the header fine (no per-record error) but the surrounding
+    // { } block is missing, so currentVoucher is never pushed onto vouchers.
+    // This is the "silent loss" case the aggregate diagnostic is designed for.
     const content = [
       '#FLAGGA 0',
       '#SIETYP 4',
       '#FNAMN "T"',
       '#RAR 0 20240101 20241231',
-      '#VER',  // Bare #VER with no fields — won't parse
+      '#VER A 1 20240115 "Test1"',
+      '#VER A 2 20240116 "Test2"',
+    ].join('\n')
+    const result = parseSIEFile(content)
+    expect(result.vouchers).toHaveLength(0)
+    expect(result.issues.some((i) => i.severity === 'error' && i.tag === 'VER')).toBe(false)
+    const verWarning = result.issues.find(
+      (i) => i.severity === 'warning' && i.tag === 'VER' && i.message.includes('#VER-rader hittades')
+    )
+    expect(verWarning).toBeTruthy()
+    expect(verWarning?.message).toContain('2 #VER-rader')
+  })
+
+  it('suppresses the aggregate VER warning when a per-record VER error already exists', () => {
+    // Bare #VER lines (no fields) emit per-record 'error'-severity issues with
+    // tag='VER'. In that case the aggregate "check separator/encoding" hint is
+    // misleading — the parser already pinpointed the real problem — so we
+    // suppress it.
+    const content = [
+      '#FLAGGA 0',
+      '#SIETYP 4',
+      '#FNAMN "T"',
+      '#RAR 0 20240101 20241231',
       '#VER',
       '#VER',
     ].join('\n')
     const result = parseSIEFile(content)
     expect(result.vouchers).toHaveLength(0)
-    const verWarning = result.issues.find(
-      (i) => i.severity === 'warning' && i.tag === 'VER'
+    expect(result.issues.some((i) => i.severity === 'error' && i.tag === 'VER')).toBe(true)
+    const aggregateVerWarning = result.issues.find(
+      (i) => i.severity === 'warning' && i.tag === 'VER' && i.message.includes('#VER-rader hittades')
     )
-    expect(verWarning).toBeTruthy()
-    expect(verWarning?.message).toContain('3 #VER-rader')
+    expect(aggregateVerWarning).toBeUndefined()
   })
 
   it('does NOT emit IB/VER warnings on a normal file with parsed records', () => {

@@ -522,8 +522,10 @@ export function parseSIEFile(content: string): ParsedSIEFile {
 
         case 'KTYP': {
           // #KTYP accountNumber type
+          // Bollbok 2025 writes the type unquoted (T), Bollbok 2026 writes it
+          // quoted ("T"). parseStringField strips the quotes in both cases.
           const accountNum = fields[1]
-          const accountType = fields[2]
+          const accountType = parseStringField(fields[2])
           const account = accounts.find((a) => a.number === accountNum)
           if (account) {
             account.accountType = accountType
@@ -725,9 +727,16 @@ export function parseSIEFile(content: string): ParsedSIEFile {
   // but parsing produced none, surface a warning instead of letting the file
   // look empty. Historically a tab-separator or encoding mismatch could swallow
   // all balance/voucher records without any visible signal.
+  //
+  // Suppressed when per-record 'error' issues already exist for the same tag —
+  // in that case the parser already pinpointed the root cause (e.g. malformed
+  // verification definition), so the generic "check separator/encoding" hint
+  // would be misleading.
   const rawIBCount = lines.filter((l) => /^\s*#IB\b/.test(l)).length
   const rawVERCount = lines.filter((l) => /^\s*#VER\b/.test(l)).length
-  if (rawIBCount > 0 && openingBalances.length === 0) {
+  const hasIBError = issues.some((i) => i.severity === 'error' && i.tag === 'IB')
+  const hasVERError = issues.some((i) => i.severity === 'error' && i.tag === 'VER')
+  if (rawIBCount > 0 && openingBalances.length === 0 && !hasIBError) {
     addIssue(
       issues,
       'warning',
@@ -736,7 +745,7 @@ export function parseSIEFile(content: string): ParsedSIEFile {
       'IB'
     )
   }
-  if (rawVERCount > 0 && vouchers.length === 0) {
+  if (rawVERCount > 0 && vouchers.length === 0 && !hasVERError) {
     addIssue(
       issues,
       'warning',
