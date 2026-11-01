@@ -8,6 +8,11 @@ name: Deploy to Vercel
 # The build output has more than 15 000 files, which is over Vercel's per-upload
 # file limit, so it is uploaded as one tgz archive.
 #
+# Upstream routes declare `export const maxDuration = 800` (Pro plan with Fluid
+# compute). The Hobby plan accepts at most 300, so the deploy is rejected. The
+# cap is applied to the CI checkout only; the repository source is untouched,
+# which keeps syncs with upstream conflict-free.
+#
 # Needs repository secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID.
 
 on:
@@ -39,6 +44,11 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 20
+
+      - name: Cap maxDuration at 300 s (Hobby plan limit)
+        run: |
+          grep -rlE 'export const maxDuration' src/app | xargs -r perl -pi -e 's/(export const maxDuration\s*=\s*)(\d+)/$1 . ($2 > 300 ? 300 : $2)/e'
+          git --no-pager diff --stat
 
       - name: Install dependencies
         run: npm ci
