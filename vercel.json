@@ -1,6 +1,7 @@
 {
-  "buildCommand": "NODE_OPTIONS=--max-old-space-size=4096 npm run build",
+  "buildCommand": "NODE_OPTIONS=--max-old-space-size=8192 npm run build",
   "regions": ["arn1"],
+  "git": {"deploymentEnabled": false},
   "crons": [
     {"path": "/api/import/sie/invariants/cron", "schedule": "15 4 * * 1"},
     {"path": "/api/import/sie/worker/cron", "schedule": "0 7 * * *"},
